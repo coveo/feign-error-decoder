@@ -59,6 +59,8 @@ public abstract class ReflectionErrorDecoder<T, S extends Exception> implements 
   private Decoder decoder = new JacksonDecoder();
   private ErrorDecoder fallbackErrorDecoder = new ErrorDecoder.Default();
 
+  private boolean isMultipleFieldsEnabled = false;
+
   public ReflectionErrorDecoder(
       Class<?> apiClass, Class<T> apiResponseClass, Class<S> baseExceptionClass) {
     this(apiClass, apiResponseClass, baseExceptionClass, "");
@@ -94,6 +96,10 @@ public abstract class ReflectionErrorDecoder<T, S extends Exception> implements 
     initialize();
   }
 
+  public void setMultipleFieldsEnabled(boolean isMultipleFieldsEnabled) {
+    this.isMultipleFieldsEnabled = isMultipleFieldsEnabled;
+  }
+
   //The copied response will be closed in SynchronousMethodHandler and the actual is closed in Util.toByteArray
   @SuppressWarnings("resource")
   @Override
@@ -107,7 +113,9 @@ public abstract class ReflectionErrorDecoder<T, S extends Exception> implements 
         if (apiResponse != null) {
           String key = getKeyFromResponse(apiResponse);
           if (exceptionsThrown.containsKey(key)) {
-            return getExceptionByReflection(key, apiResponse);
+            return isMultipleFieldsEnabled ?
+                    getExceptionByObjectMapperAndReflection(key, apiResponse, responseCopy) :
+                    getExceptionByReflection(key, apiResponse);
           } else if (runtimeExceptionsThrown.containsKey(key)) {
             return getRuntimeExceptionByReflection(key, apiResponse);
           }
@@ -181,6 +189,13 @@ public abstract class ReflectionErrorDecoder<T, S extends Exception> implements 
       throws IllegalArgumentException, IllegalAccessException, InstantiationException,
           InvocationTargetException {
     S exceptionToBeThrown = exceptionsThrown.get(exceptionKey).instantiate();
+    detailMessageField.set(exceptionToBeThrown, getMessageFromResponse(apiResponse));
+    return exceptionToBeThrown;
+  }
+
+  private S getExceptionByObjectMapperAndReflection(String exceptionKey, T apiResponse, Response response)
+          throws IllegalArgumentException, IllegalAccessException, IOException {
+    S exceptionToBeThrown = (S) decoder.decode(response, exceptionsThrown.get(exceptionKey).getClazz());
     detailMessageField.set(exceptionToBeThrown, getMessageFromResponse(apiResponse));
     return exceptionToBeThrown;
   }
